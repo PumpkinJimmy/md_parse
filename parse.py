@@ -178,7 +178,7 @@ class Renderer:
             texts.append(self.render_(block))
         res = ''.join(texts)
         for i in range(1, 6):
-            pat = re.compile("<p>" + '#' * i + ' *?([^# ]*?)</p>')
+            pat = re.compile("<p>" + '#' * i + ' *([^# ]+?.*?)</p>')
             res = pat.sub(r'<h' + str(i) + r'>\1</h' + str(i) + '>', res)
         res = re.sub("<p>[-=]{3,}</p>", "<hr />", res)
         res = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", res)
@@ -227,7 +227,7 @@ class Renderer:
 
 if __name__ == '__main__':
     parser = Parser()
-    with open("README.md", "r") as f:
+    with open("README2.md", "r") as f:
         src = f.read()
     res = parser.parse(src)
 #    blocks = parser.parse(
