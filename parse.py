@@ -1,4 +1,6 @@
 import re
+
+
 class Block:
     def __init__(self, elements):
         self.elements = elements
@@ -178,7 +180,12 @@ class Renderer:
         for i in range(1, 6):
             pat = re.compile("<p>" + '#' * i + ' *?([^# ]*?)</p>')
             res = pat.sub(r'<h' + str(i) + r'>\1</h' + str(i) + '>', res)
-        res = re.sub("<p>[-=]{3,}</p>", "<br />", res)
+        res = re.sub("<p>[-=]{3,}</p>", "<hr />", res)
+        res = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", res)
+        res = re.sub(
+            r"\*(.+?)\*",
+            r'<span style="font-style:italic">\1</span>',
+            res)
         return res
 
     def render_(self, block):
@@ -188,7 +195,6 @@ class Renderer:
             block.__class__.__name__,
             self.rdefault)
         return rfunc(block)
-
 
     def rdefault(self, block):
         return block.elements[0]
@@ -215,15 +221,20 @@ class Renderer:
         texts = []
         for ele in block.elements[1:]:
             texts.append("<li>" + ele.elements[0] + "</li>")
-        return "<p>" + block.elements[0].elements[0] + "</p>" + "<ul>" + ''.join(texts) + "</ul>"
+        return "<p>" + block.elements[0].elements[0] + \
+            "</p>" + "<ul>" + ''.join(texts) + "</ul>"
 
 
 if __name__ == '__main__':
     parser = Parser()
-    blocks = parser.parse(
-        "aaa\nbbb\nccc\n```\nddd\neee\nfff\n```\nggg\nhhh:\n- p1\n- p2\n- p3\
-\n1. n1\n2. n2\n3. n3"
-    )
-    print(blocks)
+    with open("README.md", "r") as f:
+        src = f.read()
+    res = parser.parse(src)
+#    blocks = parser.parse(
+#        "aaa\nbbb\nccc\n```\nddd\neee\nfff\n```\nggg\nhhh:\n- p1\n- p2\n- p3\
+# \n1. n1\n2. n2\n3. n3"
+#    )
+#    print(blocks)
     renderer = Renderer()
-    print(renderer.render(blocks))
+    print(res)
+    print(renderer.render(res))
