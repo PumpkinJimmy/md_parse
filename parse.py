@@ -80,10 +80,10 @@ class CodeContext(Context):
 
     @staticmethod
     def match(line):
-        return line == "```"
+        return line.strip() == "```"
 
     def handle(self, line):
-        if line == "```":
+        if line.strip() == '```':
             if self.inside:
                 self.inside = False
                 self.parser.contextExit()
