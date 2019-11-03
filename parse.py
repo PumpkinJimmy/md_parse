@@ -2,227 +2,251 @@ import re
 
 
 class Block:
-    def __init__(self, elements):
-        self.elements = elements
+
+    def __init__(self, tp, apply_filter=True, **kwargs):
+        self.type = tp
+        self.apply_filter = apply_filter
+        self.kwargs = kwargs
 
     def __repr__(self):
-        return f"<{self.__class__.__name__}: {self.elements}>"
+        return f"<{self.type}: {self.kwargs}>"
+
+    def __getattr__(self, name):
+        if name in self.kwargs:
+            return self.kwargs[name]
+        super().__getattr__(name)
 
 
-class Paragraph(Block):
-    pass
-
-
-class CodeBlock(Block):
-    pass
-
-
-class UListItem(Block):
-    pass
-
-
-class UList(Block):
-    pass
-
-
-class OListItem(Block):
-    pass
-
-
-class OList(Block):
-    pass
-
-
-class State:
+class Context:
+    # filters = [HeadlineFilter, EmphasisFilter, ItalicFilter,
+    #           ImageFilter, HrefFilter]
     def __init__(self, parser):
         self.parser = parser
         self.elements = []
+        self.init()
+        # self.filters = Context.filters[:]
+
+    def init(self):
+        pass
 
     @staticmethod
     def match(line):
         return True
 
     def handle(self, line):
-        mstate = self.parser.find_match_state(line)
-        if mstate:
-            self.parser.contextEnter(mstate(self.parser))
-        else:
-            self.elements.append(Paragraph([line]))
-            self.parser.nextLine()
+        pass
 
-    def addElement(self, element):
-        self.elements.append(element)
-
-    def create(self):
-        return self.elements
+    def create():
+        return Block("null")
 
 
-class CodeState(State):
-
-    def __init__(self, parser):
-        super().__init__(parser)
-        self.enter = False
+class HeadlineContext(Context):
+    def init(self):
+        self.hcnt = 0
 
     @staticmethod
     def match(line):
-        return line.strip() == '```'
+        return line.startswith('#') and not len(line) > 70
 
     def handle(self, line):
-        if line.strip() == '```':
-            self.parser.nextLine()
-            if not self.enter:
-                self.enter = True
+        while line.startswith('#'):
+            self.hcnt += 1
+            line = line[1:]
+        self.text = line.strip()
+        self.parser.nextLine()
+        self.parser.contextExit()
+
+    def create(self):
+        return Block("headline", text=self.text, hcnt=self.hcnt)
+
+
+class HLineContext(Context):
+    @staticmethod
+    def match(line):
+        return re.match(r"^-{3,}$", line) or \
+            re.match(r"^={3,}$", line)
+
+    def handle(self, line):
+        self.parser.nextLine()
+        self.parser.contextExit()
+
+    def create(self):
+        return Block("hline")
+
+
+class CodeContext(Context):
+    def init(self):
+        self.inside = False
+
+    @staticmethod
+    def match(line):
+        return line == "```"
+
+    def handle(self, line):
+        if line == "```":
+            if self.inside:
+                self.inside = False
+                self.parser.contextExit()
             else:
-                self.parser.contextExit(self)
+                self.inside = True
         else:
-            super().handle(line)
+            self.elements.append(line)
+        self.parser.nextLine()
 
     def create(self):
-        return CodeBlock(self.elements)
+        return Block("code", apply_filter=False, text='\n'.join(self.elements))
 
 
-class UListState(State):
-
+class UListContext(Context):
     @staticmethod
     def match(line):
-        return line.strip().endswith(':') or line.strip().endswith('：')
+        return line.startswith('-')
 
     def handle(self, line):
-        if line.strip().endswith(':') or line.strip().endswith('：'):
-            self.elements.append(Paragraph([line]))
-            self.parser.nextLine()
-            return
         if not line.startswith('-'):
-            self.parser.contextExit(self)
+            self.parser.contextExit()
         else:
-            self.elements.append(UListItem([line.lstrip('- ')]))
+            self.elements.append(line.strip('- '))
             self.parser.nextLine()
 
     def create(self):
-        if len(self.elements) == 1:
-            return self.elements[0]
-        return UList(self.elements)
+        return Block("ulist", elements=self.elements)
 
 
-class OListState(State):
-
-    def __init__(self, parser):
-        super().__init__(parser)
+class OListContext(Context):
+    def init(self):
         self.cnt = 1
 
     @staticmethod
     def match(line):
-        return line.strip().startswith('1.')
+        return line.startswith('1.')
 
     def handle(self, line):
         expect = str(self.cnt) + '.'
         if not line.startswith(expect):
-            self.parser.contextExit(self)
+            self.contextExit()
         else:
+            self.elements.append(expect + ' ')
             self.cnt += 1
-            self.elements.append(OListItem([line.lstrip(expect + ' ')]))
             self.parser.nextLine()
 
     def create(self):
-        return OList(self.elements)
+        return Block("olist", elements=self.elements)
+
+
+class QuoteContext(Context):
+    @staticmethod
+    def match(line):
+        return line.startswith('>')
+
+    def handle(self, line):
+        if not line.startswith('>'):
+            self.parser.contextExit()
+        else:
+            self.elements.append('>')
+            self.parser.nextLine()
+
+    def create(self):
+        return Block("quote", text='\n'.join(self.elements))
+
+
+class TableContext(Context):
+    @staticmethod
+    def match(line): return False
+
+
+class MathContext(Context):
+    @staticmethod
+    def match(line): return False
 
 
 class Parser:
-    def __init__(self):
-        self.states = [CodeState, UListState, OListState]
-        self.current_state = State(self)
-        self.current_lineno = 0
-        self.context = [self.current_state]
-        self.lines = []
+    contexts = [
+        HeadlineContext,
+        HLineContext,
+        CodeContext,
+        UListContext,
+        OListContext,
+        QuoteContext,
+        TableContext,
+        MathContext]
+    # filters = [HeadlineFilter, EmphasisFilter, ItalicFilter, Image, Href]
+
+    def __init__(self, ccontext=None, contexts=None, filters=None):
+        if contexts is None:
+            contexts = Parser.contexts[:]
+        self.contexts = contexts
+        self.ccontext = ccontext
+        self.lineno = 0
         self.blocks = []
 
     def parse(self, src):
-        self.lines = src.strip().split('\n')
-        if not self.lines:
-            return []
-        while self.current_lineno < len(self.lines):
-            self.current_state.handle(self.lines[self.current_lineno])
-        while len(self.context) > 1:
-            self.contextExit(self.context[-1])
-        return self.current_state.create()
+        self.lineno = 0
+        self.lines = src.rstrip().split('\n')
+        while self.lineno < len(self.lines):
+            line = self.lines[self.lineno]
+            if self.ccontext is None:
+                self.handle(line.rstrip())
+            else:
+                self.ccontext.handle(line.rstrip())
+        return self.blocks
 
     def nextLine(self):
-        self.current_lineno += 1
+        self.lineno += 1
 
-    def find_match_state(self, line):
-        for state in self.states:
-            if state.match(line):
-                return state
+    def handle(self, line):
+        for context in self.contexts:
+            if context.match(line):
+                self.ccontext = context(self)
+                return
+        self.blocks.append(Block("paragraph", text=line))
+        self.nextLine()
 
-    def contextEnter(self, state):
-        self.context.append(state)
-        self.current_state = state
-
-    def contextExit(self, state):
-        if state in self.context:
-            while self.context[-1] != state:
-                estate = self.context.pop()
-                self.context[-1].addElement(estate.create())
-            self.context.pop()
-            self.context[-1].addElement(state.create())
-            self.current_state = self.context[-1]
+    def contextExit(self):
+        if not self.ccontext:
+            return
+        self.blocks.append(self.ccontext.create())
+        self.ccontext = None
 
 
-class Renderer:
-    def __init__(self):
-        pass
-
+class HtmlRenderer:
     def render(self, blocks):
-        texts = []
+        res = []
         for block in blocks:
-            texts.append(self.render_(block))
-        res = ''.join(texts)
-        for i in range(1, 6):
-            pat = re.compile("<p>" + '#' * i + ' *([^# ]+?.*?)</p>')
-            res = pat.sub(r'<h' + str(i) + r'>\1</h' + str(i) + '>', res)
-        res = re.sub("<p>[-=]{3,}</p>", "<hr />", res)
-        res = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", res)
-        res = re.sub(
-            r"\*(.+?)\*",
-            r'<span style="font-style:italic">\1</span>',
-            res)
-        return res
-
-    def render_(self, block):
-        rfunc = getattr(
-            self,
-            "render" +
-            block.__class__.__name__,
-            self.rdefault)
-        return rfunc(block)
+            rfunc = getattr(
+                self,
+                "render_" +
+                block.type,
+                self.rdefault)
+            res.append(rfunc(block))
+        return ''.join(res)
 
     def rdefault(self, block):
-        return block.elements[0]
+        return ''
 
-    def renderCodeBlock(self, block):
+    def render_headline(self, block):
+        return f"<h{block.hcnt}>{block.text}</h{block.hcnt}>"
+
+    def render_hline(self, block):
+        return "<hr />"
+
+    def render_code(self, block):
+        return f"<pre>{block.text}</pre>"
+
+    def render_paragraph(self, block):
+        return f"<p>{block.text}</p>"
+
+    def render_olist(self, block):
         texts = []
         for ele in block.elements:
-            if isinstance(ele, Paragraph):
-                texts.append(ele.elements[0])
-            else:
-                texts.append(self.render_(ele))
-        return "<pre>" + '\n'.join(texts) + "</pre>"
-
-    def renderParagraph(self, block):
-        return "<p>" + block.elements[0] + '</p>'
-
-    def renderOList(self, block):
-        texts = []
-        for ele in block.elements:
-            texts.append("<li>" + ele.elements[0] + "</li>")
+            texts.append("<li>" + ele + "</li>")
         return "<ol>" + ''.join(texts) + "</ol>"
 
-    def renderUList(self, block):
+    def render_ulist(self, block):
         texts = []
-        for ele in block.elements[1:]:
-            texts.append("<li>" + ele.elements[0] + "</li>")
-        return "<p>" + block.elements[0].elements[0] + \
-            "</p>" + "<ul>" + ''.join(texts) + "</ul>"
+        for ele in block.elements:
+            texts.append("<li>" + ele + "</li>")
+        return "<ul>" + ''.join(texts) + "</ul>"
 
 
 if __name__ == '__main__':
@@ -235,6 +259,9 @@ if __name__ == '__main__':
 # \n1. n1\n2. n2\n3. n3"
 #    )
 #    print(blocks)
-    renderer = Renderer()
-    print(res)
-    print(renderer.render(res))
+    renderer = HtmlRenderer()
+#    print(res)
+    res2 = renderer.render(res)
+#    print(res2)
+    with open("tmp.html", 'w') as f:
+        f.write(res2)
