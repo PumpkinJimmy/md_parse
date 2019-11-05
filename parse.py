@@ -77,24 +77,28 @@ class HLineContext(Context):
 class CodeContext(Context):
     def init(self):
         self.inside = False
+        self.lang = ''
 
     @staticmethod
     def match(line):
-        return line.strip() == "```"
+        return line.strip().startswith("```")
 
     def handle(self, line):
-        if line.strip() == '```':
+        line = line.strip()
+        if line.startswith('```'):
             if self.inside:
                 self.inside = False
                 self.parser.contextExit()
             else:
                 self.inside = True
+                self.lang = line[3:]
         else:
             self.elements.append(line)
         self.parser.nextLine()
 
     def create(self):
-        return Block("code", apply_filter=False, text='\n'.join(self.elements))
+        return Block("code", apply_filter=False, text='\n'.join(self.elements),
+                     lang=self.lang)
 
 
 class UListContext(Context):
@@ -126,7 +130,7 @@ class OListContext(Context):
         if not line.startswith(expect):
             self.contextExit()
         else:
-            self.elements.append(expect + ' ')
+            self.elements.append(line.lstrip(expect + ' '))
             self.cnt += 1
             self.parser.nextLine()
 
@@ -189,6 +193,8 @@ class Parser:
                 self.handle(line.rstrip())
             else:
                 self.ccontext.handle(line.rstrip())
+        if self.ccontext:
+            self.contextExit()
         return self.blocks
 
     def nextLine(self):
@@ -210,6 +216,16 @@ class Parser:
 
 
 class HtmlRenderer:
+    def __init__(self):
+        self.filters = [
+            (r'\<((http://)?(.+?)/)\>', r'<a href="\1">\1</a>'),
+            (r'\[(.+?)\]\((.+?)\)', r'<a href="\2">\1</a>'),
+            (r'\*\*(.+?)\*\*', r'<span class="em">\1</span>'),
+            (r'\*(.+?)\*', r'<span class="ita">\1</span>'),
+            (r'!\[alt (.+?)]\((.+?)\)', r'<img alt="\1" src="\2" />')
+             ]
+        self.filters = list(map(lambda pair:
+                                (re.compile(pair[0]), pair[1]), self.filters))
     def render(self, blocks):
         res = []
         for block in blocks:
@@ -218,35 +234,42 @@ class HtmlRenderer:
                 "render_" +
                 block.type,
                 self.rdefault)
-            res.append(rfunc(block))
+            data = rfunc(block)
+            res.append(data)
         return ''.join(res)
 
     def rdefault(self, block):
         return ''
 
     def render_headline(self, block):
-        return f"<h{block.hcnt}>{block.text}</h{block.hcnt}>"
+        return f"<h{block.hcnt}>{self.filter(block.text)}</h{block.hcnt}>"
 
     def render_hline(self, block):
         return "<hr />"
 
     def render_code(self, block):
-        return f"<pre>{block.text}</pre>"
+        return f'<pre><code class="hljs {block.lang}">{block.text}</code></pre>'
 
     def render_paragraph(self, block):
-        return f"<p>{block.text}</p>"
+        return f"<p>{self.filter(block.text)}</p>"
 
     def render_olist(self, block):
         texts = []
         for ele in block.elements:
             texts.append("<li>" + ele + "</li>")
-        return "<ol>" + ''.join(texts) + "</ol>"
+        return "<ol>" + self.filter(''.join(texts)) + "</ol>"
+
 
     def render_ulist(self, block):
         texts = []
         for ele in block.elements:
             texts.append("<li>" + ele + "</li>")
-        return "<ul>" + ''.join(texts) + "</ul>"
+        return "<ul>" + self.filter(''.join(texts)) + "</ul>"
+
+    def filter(self, data):
+        for pat, repl in self.filters:
+            data = pat.sub(repl, data)
+        return data
 
 
 if __name__ == '__main__':
