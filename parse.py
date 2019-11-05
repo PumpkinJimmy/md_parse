@@ -84,8 +84,8 @@ class CodeContext(Context):
         return line.strip().startswith("```")
 
     def handle(self, line):
-        line = line.strip()
-        if line.startswith('```'):
+        if line.strip().startswith('```'):
+            line = line.strip()
             if self.inside:
                 self.inside = False
                 self.parser.contextExit()
