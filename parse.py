@@ -128,7 +128,7 @@ class OListContext(Context):
     def handle(self, line):
         expect = str(self.cnt) + '.'
         if not line.startswith(expect):
-            self.contextExit()
+            self.parser.contextExit()
         else:
             self.elements.append(line.lstrip(expect + ' '))
             self.cnt += 1
