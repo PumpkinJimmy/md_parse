@@ -1,3 +1,4 @@
+from urllib.parse import quote
 import re
 
 
@@ -147,11 +148,11 @@ class QuoteContext(Context):
         if not line.startswith('>'):
             self.parser.contextExit()
         else:
-            self.elements.append('>')
+            self.elements.append(line.lstrip('>'))
             self.parser.nextLine()
 
     def create(self):
-        return Block("quote", text='\n'.join(self.elements))
+        return Block("quote", elements=self.elements)
 
 
 class TableContext(Context):
@@ -218,14 +219,15 @@ class Parser:
 class HtmlRenderer:
     def __init__(self):
         self.filters = [
-            (r'\<((http://)?(.+?)/)\>', r'<a href="\1">\1</a>'),
+            (r'!\[alt (.+?)\]\((.+?)\)', r'<img alt="\1" src="\2" />'),
+            (r'\[\]\((.+?)\)', r'<a href="\1">\1</a>'),
             (r'\[(.+?)\]\((.+?)\)', r'<a href="\2">\1</a>'),
             (r'\*\*(.+?)\*\*', r'<span class="em">\1</span>'),
             (r'\*(.+?)\*', r'<span class="ita">\1</span>'),
-            (r'!\[alt (.+?)]\((.+?)\)', r'<img alt="\1" src="\2" />')
              ]
         self.filters = list(map(lambda pair:
                                 (re.compile(pair[0]), pair[1]), self.filters))
+
     def render(self, blocks):
         res = []
         for block in blocks:
@@ -253,18 +255,21 @@ class HtmlRenderer:
     def render_paragraph(self, block):
         return f"<p>{self.filter(block.text)}</p>"
 
+    def render_quote(self, block):
+        text = '</p><p>'.join(block.elements)
+        return f"<blockquote><p>{self.filter(text)}</p></blockquote>"
+
     def render_olist(self, block):
         texts = []
         for ele in block.elements:
-            texts.append("<li>" + ele + "</li>")
-        return "<ol>" + self.filter(''.join(texts)) + "</ol>"
-
+            texts.append("<li>" + self.filter(ele) + "</li>")
+        return "<ol>" + ''.join(texts) + "</ol>"
 
     def render_ulist(self, block):
         texts = []
         for ele in block.elements:
-            texts.append("<li>" + ele + "</li>")
-        return "<ul>" + self.filter(''.join(texts)) + "</ul>"
+            texts.append("<li>" + self.filter(ele) + "</li>")
+        return "<ul>" + ''.join(texts) + "</ul>"
 
     def filter(self, data):
         for pat, repl in self.filters:
@@ -277,14 +282,7 @@ if __name__ == '__main__':
     with open("README2.md", "r") as f:
         src = f.read()
     res = parser.parse(src)
-#    blocks = parser.parse(
-#        "aaa\nbbb\nccc\n```\nddd\neee\nfff\n```\nggg\nhhh:\n- p1\n- p2\n- p3\
-# \n1. n1\n2. n2\n3. n3"
-#    )
-#    print(blocks)
     renderer = HtmlRenderer()
-#    print(res)
     res2 = renderer.render(res)
-#    print(res2)
     with open("tmp.html", 'w') as f:
         f.write(res2)
