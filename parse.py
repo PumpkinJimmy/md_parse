@@ -19,13 +19,10 @@ class Block:
 
 
 class Context:
-    # filters = [HeadlineFilter, EmphasisFilter, ItalicFilter,
-    #           ImageFilter, HrefFilter]
     def __init__(self, parser):
         self.parser = parser
         self.elements = []
         self.init()
-        # self.filters = Context.filters[:]
 
     def init(self):
         pass
@@ -37,8 +34,14 @@ class Context:
     def handle(self, line):
         pass
 
-    def create():
+    def accept(self, block):
+        self.elements.append(block)
+
+    def create(self):
         return Block("null")
+
+    def on_exit(self):
+        pass
 
 
 class HeadlineContext(Context):
@@ -105,38 +108,95 @@ class CodeContext(Context):
 class UListContext(Context):
     @staticmethod
     def match(line):
-        return line.startswith('-')
+        return line.startswith('- ')
+
+    def __init__(self, parser, indent=0):
+        super().__init__(parser)
+        self.indent = indent
+        self.li_eles = []
 
     def handle(self, line):
-        if not line.startswith('-'):
+        if self.indent and not line[:self.indent].isspace():
+
             self.parser.contextExit()
-        else:
-            self.elements.append(line.strip('- '))
+        line = line[self.indent:]
+        if line.startswith('- '):
+            if self.li_eles:
+                self.elements.append(Block('listitem', elements=self.li_eles))
+                self.li_eles = []
+            line = line.lstrip('- ').rstrip(' ')
+            self.li_eles.append(Block('paragraph', text=line))
             self.parser.nextLine()
+        elif line[:2].isspace():
+            line = line.lstrip('  ').rstrip(' ')
+            for context in self.parser.contexts:
+                if context.match(line):
+                    self.parser.contextEnter(
+                        context(self.parser, self.indent + 2))
+                    return
+            self.li_eles.append(Block('paragraph', text=line))  # if not match
+            self.parser.nextLine()
+        else:
+            self.parser.contextExit()
 
     def create(self):
         return Block("ulist", elements=self.elements)
 
+    def accept(self, block):
+        self.li_eles.append(block)
+
+    def on_exit(self):
+        if self.li_eles:
+            self.elements.append(Block('listitem', elements=self.li_eles))
+
 
 class OListContext(Context):
-    def init(self):
+    def __init__(self, parser, indent=0):
+        super().__init__(parser)
+        self.indent = indent
         self.cnt = 1
+        self.li_eles = []
 
     @staticmethod
     def match(line):
-        return line.startswith('1.')
+        return line.startswith('1. ')
 
     def handle(self, line):
-        expect = str(self.cnt) + '.'
-        if not line.startswith(expect):
+        if self.indent and not line[:self.indent].isspace():
             self.parser.contextExit()
-        else:
-            self.elements.append(line.lstrip(expect + ' '))
+        expect = str(self.cnt) + '. '
+        line = line[self.indent:]
+        if line.startswith(expect):
+            if self.li_eles:
+                self.elements.append(Block('listitem', elements=self.li_eles))
+                self.li_eles = []
+            line = line.lstrip(expect).rstrip()
+            self.li_eles.append(Block('paragraph', text=line))
             self.cnt += 1
             self.parser.nextLine()
+        elif line[:len(expect)].isspace():
+            line = line[len(expect):]
+            for context in self.parser.contexts:
+                if context.match(line):
+                    self.parser.contextEnter(
+                                             context(
+                                                 self.parser, self.indent +
+                                                 len(expect)))
+                    return
+            self.li_eles.append(Block('paragraph', text=line))  # if not match
+            self.parser.nextLine()
+        else:
+            self.parser.contextExit()
 
     def create(self):
         return Block("olist", elements=self.elements)
+
+    def accept(self, block):
+        self.li_eles.append(block)
+
+    def on_exit(self):
+        if self.li_eles:
+            self.elements.append(Block('listitem', elements=self.li_eles))
 
 
 class QuoteContext(Context):
@@ -177,11 +237,13 @@ class Parser:
         MathContext]
     # filters = [HeadlineFilter, EmphasisFilter, ItalicFilter, Image, Href]
 
-    def __init__(self, ccontext=None, contexts=None, filters=None):
+    def __init__(self, ccontexts=None, contexts=None, filters=None):
         if contexts is None:
             contexts = Parser.contexts[:]
         self.contexts = contexts
-        self.ccontext = ccontext
+        if ccontexts is None:
+            ccontexts = []
+        self.ccontexts = ccontexts
         self.lineno = 0
         self.blocks = []
 
@@ -190,30 +252,40 @@ class Parser:
         self.lines = src.rstrip().split('\n')
         while self.lineno < len(self.lines):
             line = self.lines[self.lineno]
-            if self.ccontext is None:
+            if not self.ccontexts:
                 self.handle(line.rstrip())
             else:
-                self.ccontext.handle(line.rstrip())
-        if self.ccontext:
+                self.ccontexts[-1].handle(line.rstrip())
+        while self.ccontexts:
             self.contextExit()
         return self.blocks
 
     def nextLine(self):
         self.lineno += 1
 
-    def handle(self, line):
+    def contextMatch(self, line):
         for context in self.contexts:
             if context.match(line):
-                self.ccontext = context(self)
-                return
-        self.blocks.append(Block("paragraph", text=line))
-        self.nextLine()
+                self.contextEnter(context(self))
+                return True
+
+    def handle(self, line):
+        if not self.contextMatch(line):
+            self.blocks.append(Block("paragraph", text=line))
+            self.nextLine()
+
+    def contextEnter(self, context):
+        self.ccontexts.append(context)
 
     def contextExit(self):
-        if not self.ccontext:
+        if not self.ccontexts:
             return
-        self.blocks.append(self.ccontext.create())
-        self.ccontext = None
+        econtext = self.ccontexts.pop(-1)
+        econtext.on_exit()
+        if self.ccontexts:
+            self.ccontexts[-1].accept(econtext.create())
+        else:
+            self.blocks.append(econtext.create())
 
 
 class HtmlRenderer:
@@ -228,16 +300,19 @@ class HtmlRenderer:
         self.filters = list(map(lambda pair:
                                 (re.compile(pair[0]), pair[1]), self.filters))
 
+    def _render(self, block):
+        rfunc = getattr(
+            self,
+            "render_" +
+            block.type,
+            self.rdefault)
+        data = rfunc(block)
+        return data
+
     def render(self, blocks):
         res = []
         for block in blocks:
-            rfunc = getattr(
-                self,
-                "render_" +
-                block.type,
-                self.rdefault)
-            data = rfunc(block)
-            res.append(data)
+            res.append(self._render(block))
         return ''.join(res)
 
     def rdefault(self, block):
@@ -262,14 +337,29 @@ class HtmlRenderer:
     def render_olist(self, block):
         texts = []
         for ele in block.elements:
-            texts.append("<li>" + self.filter(ele) + "</li>")
+            if isinstance(ele, Block):
+                texts.append(self._render(ele))
+            else:
+                texts.append(ele)
         return "<ol>" + ''.join(texts) + "</ol>"
 
     def render_ulist(self, block):
         texts = []
         for ele in block.elements:
-            texts.append("<li>" + self.filter(ele) + "</li>")
+            if isinstance(ele, Block):
+                texts.append(self._render(ele))
+            else:
+                texts.append(ele)
         return "<ul>" + ''.join(texts) + "</ul>"
+
+    def render_listitem(self, block):
+        texts = []
+        for ele in block.elements:
+            if isinstance(ele, Block):
+                texts.append(self._render(ele))
+            else:
+                texts.append(ele)
+        return "<li>" + ''.join(texts) + "</li>"
 
     def filter(self, data):
         for pat, repl in self.filters:
