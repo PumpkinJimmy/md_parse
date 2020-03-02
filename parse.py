@@ -117,7 +117,6 @@ class UListContext(Context):
 
     def handle(self, line):
         if self.indent and not line[:self.indent].isspace():
-
             self.parser.contextExit()
         line = line[self.indent:]
         if line.startswith('- '):
@@ -296,6 +295,7 @@ class HtmlRenderer:
             (r'\[(.+?)\]\((.+?)\)', r'<a href="\2">\1</a>'),
             (r'\*\*(.+?)\*\*', r'<span class="em">\1</span>'),
             (r'\*(.+?)\*', r'<span class="ita">\1</span>'),
+            (r'`(.+?)`', r'<code>\1</code>'),
              ]
         self.filters = list(map(lambda pair:
                                 (re.compile(pair[0]), pair[1]), self.filters))
@@ -318,6 +318,8 @@ class HtmlRenderer:
     def rdefault(self, block):
         return ''
 
+    def render_text(self, block):
+        return block.text
     def render_headline(self, block):
         return f"<h{block.hcnt}>{self.filter(block.text)}</h{block.hcnt}>"
 
