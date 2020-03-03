@@ -3,6 +3,9 @@ import re
 
 
 class Block:
+    """
+    The interface of the AST block
+    """
 
     def __init__(self, tp, apply_filter=True, **kwargs):
         self.type = tp
@@ -19,6 +22,9 @@ class Block:
 
 
 class Context:
+    """
+    The interface of the parsing context
+    """
     def __init__(self, parser):
         self.parser = parser
         self.elements = []
@@ -220,6 +226,10 @@ class TableContext(Context):
 
 
 class MathContext(Context):
+    @staticmethod
+    def match(line): return False
+
+class InlineMathContext(Context):
     @staticmethod
     def match(line): return False
 
