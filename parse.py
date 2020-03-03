@@ -133,6 +133,7 @@ class UListContext(IndentContext):
     def handle(self, line):
         if self.indent and not line[:self.indent].isspace():
             self.parser.contextExit()
+            return
         line = line[self.indent:]
         if line.startswith('- '):
             if self.li_eles:
@@ -178,6 +179,7 @@ class OListContext(IndentContext):
     def handle(self, line):
         if self.indent and not line[:self.indent].isspace():
             self.parser.contextExit()
+            return
         expect = str(self.cnt) + '. '
         line = line[self.indent:]
         if line.startswith(expect):
@@ -392,7 +394,7 @@ class HtmlRenderer:
 
 if __name__ == '__main__':
     parser = Parser()
-    with open("common.md", "r") as f:
+    with open("md_parse/tmp.md", "r") as f:
         src = f.read()
     res = parser.parse(src)
     renderer = HtmlRenderer()
