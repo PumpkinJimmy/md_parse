@@ -43,6 +43,15 @@ class Context:
     def on_exit(self):
         pass
 
+class IndentContext(Context):
+    def __init__(self, parser, indent=0):
+        super().__init__(parser)
+        self.indent = indent
+    def applyIndent(self, line):
+        if line[:self.indent] != ' ' * self.indent:
+            raise Exception("Invalid indent")
+        return line[self.indent:]
+
 
 class HeadlineContext(Context):
     def init(self):
@@ -78,7 +87,7 @@ class HLineContext(Context):
         return Block("hline")
 
 
-class CodeContext(Context):
+class CodeContext(IndentContext):
     def init(self):
         self.inside = False
         self.lang = ''
@@ -88,6 +97,7 @@ class CodeContext(Context):
         return line.strip().startswith("```")
 
     def handle(self, line):
+        line = self.applyIndent(line).rstrip()
         if line.strip().startswith('```'):
             line = line.strip()
             if self.inside:
@@ -105,14 +115,13 @@ class CodeContext(Context):
                      lang=self.lang)
 
 
-class UListContext(Context):
+class UListContext(IndentContext):
     @staticmethod
     def match(line):
         return line.startswith('- ')
 
     def __init__(self, parser, indent=0):
-        super().__init__(parser)
-        self.indent = indent
+        super().__init__(parser,indent)
         self.li_eles = []
 
     def handle(self, line):
@@ -131,7 +140,7 @@ class UListContext(Context):
             for context in self.parser.contexts:
                 if context.match(line):
                     self.parser.contextEnter(
-                        context(self.parser, self.indent + 2))
+                        context(self.parser, self.indent+2))
                     return
             self.li_eles.append(Block('paragraph', text=line))  # if not match
             self.parser.nextLine()
@@ -149,9 +158,9 @@ class UListContext(Context):
             self.elements.append(Block('listitem', elements=self.li_eles))
 
 
-class OListContext(Context):
+class OListContext(IndentContext):
     def __init__(self, parser, indent=0):
-        super().__init__(parser)
+        super().__init__(parser, indent)
         self.indent = indent
         self.cnt = 1
         self.li_eles = []
@@ -198,12 +207,13 @@ class OListContext(Context):
             self.elements.append(Block('listitem', elements=self.li_eles))
 
 
-class QuoteContext(Context):
+class QuoteContext(IndentContext):
     @staticmethod
     def match(line):
         return line.startswith('>')
 
     def handle(self, line):
+        line = self.applyIndent(line).rstrip()
         if not line.startswith('>'):
             self.parser.contextExit()
         else:
@@ -295,7 +305,8 @@ class HtmlRenderer:
             (r'\[(.+?)\]\((.+?)\)', r'<a href="\2">\1</a>'),
             (r'\*\*(.+?)\*\*', r'<span class="em">\1</span>'),
             (r'\*(.+?)\*', r'<span class="ita">\1</span>'),
-            (r'`(.+?)`', r'<code>\1</code>'),
+            (r'`(.+?)`', r' <code>\1</code> '),
+            (r'$(.+?)$', r'\1')
              ]
         self.filters = list(map(lambda pair:
                                 (re.compile(pair[0]), pair[1]), self.filters))
@@ -371,7 +382,7 @@ class HtmlRenderer:
 
 if __name__ == '__main__':
     parser = Parser()
-    with open("README2.md", "r") as f:
+    with open("common.md", "r") as f:
         src = f.read()
     res = parser.parse(src)
     renderer = HtmlRenderer()
