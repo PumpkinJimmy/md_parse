@@ -18,7 +18,7 @@ class Block:
     def __getattr__(self, name):
         if name in self.kwargs:
             return self.kwargs[name]
-        super().__getattr__(name)
+        super().__getattribute__(name)
 
 
 class Context:
@@ -344,7 +344,10 @@ class HtmlRenderer:
     def render_text(self, block):
         return block.text
     def render_headline(self, block):
-        return f"<h{block.hcnt}>{self.filter(block.text)}</h{block.hcnt}>"
+        if hasattr(block, 'anchor'):
+            return f'<h{block.hcnt}><a name="{block.anchor}">{self.filter(block.text)}</a></h{block.hcnt}>'
+        else:
+            return f"<h{block.hcnt}>{self.filter(block.text)}</h{block.hcnt}>"
 
     def render_hline(self, block):
         return "<hr />"
@@ -391,12 +394,62 @@ class HtmlRenderer:
             data = pat.sub(repl, data)
         return data
 
-
+class ContentsParser:
+    def __init__(self):
+        pass
+    def parse(self, ast):
+        cnt = 1
+        s = []
+        roots = []
+        peeks = roots
+        last = None
+        for e in ast:
+            if e.type == 'headline':
+                e.anchor = cnt
+                e = Block(tp='headline', text=e.text, hcnt=e.hcnt)
+                e.anchor = cnt
+                e.children = []
+                cnt += 1
+                if last is None:
+                    peeks.append(e)
+                else:
+                    if last.hcnt == e.hcnt:
+                        peeks.append(e)
+                    elif last.hcnt < e.hcnt:
+                        s.append(last)
+                        last.children.append(e)
+                        peeks = last.children
+                    else:
+                        while s and s[-1].hcnt >= e.hcnt:
+                            s.pop()
+                        if not s:
+                            peeks = roots
+                        else:
+                            peeks = s[-1].children
+                        peeks.append(e)
+                last = e
+        return roots
+class ContentsRenderer:
+    def __init__(self):
+        pass
+    def render(self, roots):
+        s = ['<ul>']
+        for root in roots:
+            s.extend([f'<li><a href="#{root.anchor}">', root.text, '</a>'])
+            if root.children:
+                s.append(self.render(root.children))
+            s.append('</li>')
+        s.append('</ul>')
+        return ''.join(s)
 if __name__ == '__main__':
     parser = Parser()
     with open("md_parse/tmp.md", "r") as f:
         src = f.read()
     res = parser.parse(src)
+    cparser = ContentsParser()
+    cs = cparser.parse(res)
+    print(cs)
+    print(ContentsRenderer().render(cs))
     renderer = HtmlRenderer()
     res2 = renderer.render(res)
     with open("tmp.html", 'w') as f:
